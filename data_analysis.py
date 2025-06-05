@@ -1,419 +1,347 @@
+"""
+财务造假检测数据预处理项目
+主要功能：
+1. 数据加载与合并
+2. 探索性数据分析（EDA）
+3. 数据预处理（缺失值处理、噪声处理、特征变换）
+4. 特征工程（降维、特征选择）
+5. 结果导出
+"""
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import warnings, time, datetime, joblib
-warnings.filterwarnings('ignore')
-
-# 1.获取数据
-df_category = pd.read_csv('data/data1.csv', encoding='utf-8', on_bad_lines='skip') # 行业类别
-df_all = pd.read_csv('data/data2.csv', encoding='utf-8', on_bad_lines='skip') # 财务数据
-df_fields = pd.read_excel('data/data3.xlsx') # 字段含义
-
-# 方便后续查看字段含义
-fields = dict(zip(df_fields['字段名'], zip(df_fields['含义'], df_fields['单位'])))
-print(fields['TICKER_SYMBOL'])
-
-# #fields # In a script, this would print a large dictionary. Commenting out.
-# print(fields)
-
-#数据合并
-df_category.columns = ['TICKER_SYMBOL', '所属行业']
-df_all = pd.merge(df_all, df_category, how='left', on=['TICKER_SYMBOL'])
-df_all.insert(1, 'INDUSTRY', df_all.pop('所属行业'))
-fields['INDUSTRY'] = ('所属行业', np.nan)
-
-print(df_all.head())
-print(df_all.shape)
-print(df_all['FLAG'].value_counts())
-# print(df_all['FLAG'].value_counts()) # Redundant display in notebook
-
-print(df_all.dtypes)
-
-
-# 2.数据探索
-
-## 数据分布可视化
-print(df_all['INDUSTRY'])
-
-df = df_all[df_all['INDUSTRY'] == '制造业']
-# 数据去重
-df.drop_duplicates(inplace=True)
-# df = df.drop_duplicates() # Redundant
-
-#drop ,reset_index
-df = df.drop_duplicates().reset_index(drop=True) # Added reset_index for good practice
-
-print(df.shape)
-
-plt.rcParams['font.sans-serif'] = ['fangsong'] # 设置中文字体
-plt.rcParams['axes.unicode_minus'] = False # 解决负号显示异常
-
-numeric_cols_test = ['AP', 'ADVANCE_RECEIPTS', 'SOLD_FOR_REPUR_FA', 'PAYROLL_PAYABLE', 'TAXES_PAYABLE',
-                     'INT_PAYABLE', 'DIV_PAYABLE', 'OTH_PAYABLE']
-
-# The following loop generates plots. In a script, these will be displayed sequentially.
-# If saving is needed, plt.savefig() would be used.
-for col in numeric_cols_test:
-    plt.figure(figsize=(8, 4))
-    plt.subplot(1, 2, 1)
-    sns.histplot(df[col], kde=True)
-    plt.title(f'Histogram of {fields[col]}')
-    plt.subplot(1, 2, 2)
-    sns.boxplot(x=df[col])
-    plt.title(f'Boxplot of {fields[col]}')
-    plt.savefig(f'plots/{col}_hist_box.png')
-
-
-# 数值型变量分布可视化
-def plot_numeric_distribution(df_plot, numeric_cols_plot, n_cols=4):
-    n_rows = (len(numeric_cols_plot) + n_cols - 1) // n_cols
-    plt.figure(figsize=(20, 5 * n_rows))
-    
-    for i, col in enumerate(numeric_cols_plot):
-        plt.subplot(n_rows, n_cols, i + 1)
-        sns.histplot(df_plot[col], kde=True, bins=30)
-        plt.title(f'{fields[col]} 分布', fontsize=12)
-        plt.xlabel('')
-    
-    plt.tight_layout()
-    plt.savefig(f'plots/{col}_hist_box.png')
-
-# 选择部分数值型变量进行可视化
-plot_numeric_distribution(df, numeric_cols_test)
-
-
-print(df.describe())
-
-# 数据探索：不同字段分布的可视化绘图
-# 数值型字段的直方图和箱线图
-numeric = df.describe()
-numeric_cols = numeric.columns
-print(numeric_cols)
-
-# 分类型字段的柱状图
-nominal = df_all.describe(include=['O']) # Note: Using df_all as in notebook, might intend df
-nominal_cols = nominal.columns
-print(df.describe(include='O')) # In notebook, df.describe(include='O') was executed
-
-str_col = df.describe(include='O') # Corrected to use df as per subsequent cells
-str_cols = str_col.columns
-print(str_cols)
-
-
-# The following loop generates plots.
-for col in nominal_cols: # Note: nominal_cols is from df_all, but plotting uses df
-    if col in df.columns: # Added check to prevent error if col not in df
-        plt.figure(figsize=(6, 4))
-        sns.countplot(x=col, data=df)
-        plt.title(f'Bar plot of {fields.get(col, (col,None))[0]}') # Used .get for fields
-        plt.xticks(rotation=45)
-        plt.savefig(f'plots/{col}_hist_box.png')
-    else:
-        print(f"Column {col} not in filtered DataFrame df, skipping countplot.")
-
-
-## 缺失值分析
-
-# 缺失值统计
-print(df.isnull().sum())
-
-# !pip install missingno # This should be done in the environment, not in the script
-import missingno
-missingno.matrix(df, figsize=(15, 10))
-plt.savefig(f'plots/{col}_hist_box.png')
-
-# 缺失值统计
-# 制作缺失值统计表格
-def miss_data_count(data_in):
-    data_null_out = pd.DataFrame(data_in.isnull().sum(), columns=['缺失值数量'])
-    data_null_out['缺失率'] = 0.0
-    for i in range(data_null_out.shape[0]):
-        data_null_out.iloc[i, data_null_out.columns.get_loc('缺失率')] = round((data_null_out.iloc[i, data_null_out.columns.get_loc('缺失值数量')] / data_in.shape[0]) * 100, 2)
-
-    data_null_out['数据类型'] = data_in.dtypes
-    data_null_out.reset_index(inplace=True)
-    data_null_out.columns = ['字段名', '缺失值数量', '缺失率', '数据类型']
-    return data_null_out
-
-data_null = miss_data_count(df)
-print(data_null)
-
-# 3.数据预处理
-## 缺失值处理
-
-# # 1. 人工填写空缺值（示例：手动将字段 'FIELD_NAME' 的缺失值填充为 'VALUE'）
-# # df['FIELD_NAME'] = df['FIELD_NAME'].fillna('VALUE') # This was a placeholder
-
-# # 2. 全局变量填充（示例：将所有缺失值填充为 0）
-# df_global_fill = df.fillna(0) # Creates a new DataFrame, not used later in executed path
-
-# # 3. 平均值填充（示例：对数值型字段进行平均值填充）
-# numeric_cols_fill_mean = df.select_dtypes(include=[np.number]).columns
-# df_mean_fill = df.copy()
-# for col in numeric_cols_fill_mean:
-#     mean_value = df[col].mean()
-#     df_mean_fill[col] = df_mean_fill[col].fillna(mean_value) # Creates a new DataFrame
-
-# # 4. 同类样本均值填充（示例：按 'INDUSTRY' 分组，对数值型字段进行同类样本均值填充）
-# df_group_fill = df.copy()
-# for col in numeric_cols_fill_mean: # Assuming numeric_cols_fill_mean is still relevant
-#     if col != 'INDUSTRY': # Avoid trying to fill the group_col itself if it's numeric
-#         df_group_fill[col] = df_group_fill.groupby('INDUSTRY')[col].transform(lambda x: x.fillna(x.mean())) # Creates new DF
-
-# # 5. 预测填充（示例：使用线性回归对缺失值进行预测填充）
-# # from sklearn.linear_model import LinearRegression
-# #
-# # df_pred_fill = df.copy()
-# # for col in numeric_cols: # Assuming numeric_cols is still relevant
-# #     if df_pred_fill[col].isnull().sum() > 0:
-# #         # This part needs careful feature engineering for X_train and X_test
-# #         # The original raw cell had a conceptual outline but not directly executable code
-# #         # for a generic case without specifying features for regression.
-# #         print(f"Skipping predictive fill for {col} due to complexity in script conversion.")
-# #         pass
-
-# # 6. 删除缺失值
-# # #df_dropna = df.dropna()
-# # # 删除缺失值占比大于70%的列
-# # def drop_missing(df_to_drop, threshold=0.7):
-# # # 删除缺失率超过threshold的列
-# #     missing_ratio = df_to_drop.isnull().sum() / len(df_to_drop)
-# #     cols_to_drop_func = missing_ratio[missing_ratio > threshold].index
-# #     df_dropped = df_to_drop.drop(columns=cols_to_drop_func)
-# # # 删除仍有缺失值的行
-# # #df_dropped = df_dropped.dropna()
-# # return df_dropped
-# #
-# # # 示例：删除缺失率超过70%的列和仍有缺失值的行
-# # df0_dropped = drop_missing(df, 0.7) # This was a raw cell, not executed in the main flow on 'df'
-
-# Actual executed missing value handling:
-dropna_cols = []
-fill0_cols = []
-
-# data_null was created from the original df
-for index, row in data_null.iterrows():
-    if row['缺失率'] >= 70:
-        dropna_cols.append(row['字段名'])
-    # FLAG is the target, handle its NaN separately if needed, or it might be in fill0_cols
-    elif row['字段名'] != 'FLAG' and row['缺失率'] > 0 : # Ensure FLAG is not in fill0_cols for simple fill(0)
-        fill0_cols.append(row['字段名'])
-    elif row['字段名'] == 'FLAG' and row['缺失率'] > 0: # Handle FLAG separately if needed
-        print(f"Target variable 'FLAG' has {row['缺失值数量']} missing values. Consider imputation or removal.")
-        # For now, let's assume FLAG missing values rows will be dropped or handled later
-        # The notebook code puts FLAG into fill0_cols if < 70% missing
-        if row['缺失率'] < 70:
-             fill0_cols.append(row['字段名'])
-
-
-df.drop(columns=dropna_cols, inplace=True)
-df[fill0_cols] = df[fill0_cols].fillna(value=0) # axis=1 is for dropping, not fillna here
-
-# Handle remaining NaNs in FLAG if not already handled by fill0_cols
-if 'FLAG' in df.columns and df['FLAG'].isnull().sum() > 0:
-    print(f"FLAG still has {df['FLAG'].isnull().sum()} NaNs. Dropping these rows for now.")
-    df.dropna(subset=['FLAG'], inplace=True)
-
-print(df.head())
-print(df.shape)
-
-## 噪声数据处理
-
-# Create df0 from the cleaned df for transformations
-df0 = df.copy()
-
-# 分箱平滑
-def bin_smooth(df_in, col, n_bins=5, method='mean'):
-    df_out = df_in.copy()
-    # Ensure the column is numeric and has no NaNs for pd.cut
-    if pd.api.types.is_numeric_dtype(df_out[col]) and df_out[col].notnull().all():
-        try:
-            df_out[f'{col}_bin'] = pd.cut(df_out[col], bins=n_bins)
-            
-            if method == 'mean':
-                smooth_values = df_out.groupby(f'{col}_bin')[col].transform('mean')
-            elif method == 'median':
-                smooth_values = df_out.groupby(f'{col}_bin')[col].transform('median')
-            elif method == 'boundary': # This method doesn't make sense for filling
-                print(f"Boundary method for bin_smooth on {col} is illustrative, not for filling.")
-                return df_out # Return original df for this case or handle differently
-            else:
-                print(f"Unknown smoothing method: {method}")
-                return df_out
-
-            df_out[f'{col}_smooth'] = smooth_values
-            df_out.drop(columns=[f'{col}_bin'], inplace=True) # Drop the temporary bin column
-        except Exception as e:
-            print(f"Error during bin_smooth for {col}: {e}")
-    else:
-        print(f"Column {col} is not suitable for bin_smooth (not numeric or contains NaNs).")
-    return df_out
-
-
-# 示例：对营业税金及附加进行分箱平滑
-print(pd.cut(df0['BIZ_TAX_SURCHG'], bins=5)) # Show bins as in notebook
-df0 = bin_smooth(df0, 'BIZ_TAX_SURCHG', n_bins=5, method='mean')
-# data0_null = miss_data_count(df0) # For inspection, not strictly needed for flow
-# print(data0_null[data0_null['字段名']=='TFA_TURNOVER']) # This field might have been dropped
-
-# # 回归平滑
-# # from sklearn.linear_model import LinearRegression
-# # def regression_smooth(df, target_col, feature_cols):
-# # # This was a raw cell and requires specific feature_cols which are not defined for this generic case.
-# # print("Skipping regression_smooth example as it was in a raw cell and needs specific setup.")
-# # # df0 = regression_smooth(df0, 'ACCOUNTS_RECEIVABLE', ['TOTAL_ASSETS', 'TOTAL_LIABILITIES'])
-
-## 数据变换
-# 移动平均光滑
-def moving_average_smooth(df_in, col, window=3):
-    df_out = df_in.copy()
-    if col in df_out.columns and pd.api.types.is_numeric_dtype(df_out[col]):
-        df_out[f'{col}_smooth'] = df_out[col].rolling(window=window, min_periods=1).mean()
-    else:
-        print(f"Column {col} not found or not numeric for moving_average_smooth.")
-    return df_out
-
-# 示例：对所有者权益进行移动平均光滑
-df0 = moving_average_smooth(df0, 'T_SH_EQUITY', window=3)
-print(df0.head())
-
-# 数据泛化（将数值转换为类别）
-def generalize_data(df_in, col, bins, labels):
-    df_out = df_in.copy()
-    if col in df_out.columns and pd.api.types.is_numeric_dtype(df_out[col]):
-        df_out[f'{col}_generalized'] = pd.cut(df_out[col], bins=bins, labels=labels, right=False) # Added right=False for consistency if needed
-    else:
-        print(f"Column {col} not found or not numeric for generalize_data.")
-    return df_out
-
-# 示例：将净利润泛化为小、中、大三类
-bins = [-float('inf'), 1e8, 1e9, float('inf')] # Adjusted bins to include negative profits if any
-labels = ['小型企业', '中型企业', '大型企业']
-df0 = generalize_data(df0, 'N_INCOME', bins, labels)
-print(df0.head())
-
-
-# 数值规约（对数变换）
-def reduce_numerical(df_in, cols_reduce):
-    df_out = df_in.copy()
-    for col in cols_reduce:
-        if col in df_out.columns and pd.api.types.is_numeric_dtype(df_out[col]):
-            # Ensure non-negative values for log1p, or handle negatives appropriately
-            if (df_out[col] < 0).any():
-                print(f"Warning: Column {col} contains negative values. Log transform might not be appropriate or needs adjustment.")
-                # Example: shift before log, if meaningful
-                # df_out[f'log_{col}'] = np.log1p(df_out[col] - df_out[col].min())
-                df_out[f'log_{col}'] = np.log1p(df_out[col].apply(lambda x: x if x >= 0 else 0)) # Simple handling
-            else:
-                df_out[f'log_{col}'] = np.log1p(df_out[col])
-        else:
-            print(f"Column {col} not found or not numeric for reduce_numerical.")
-    return df_out
-
-# 示例：对营业外收入进行对数变换
-cols_to_reduce = ['NOPERATE_INCOME']
-df0 = reduce_numerical(df0, cols_to_reduce)
-print(df0[['NOPERATE_INCOME','log_NOPERATE_INCOME']])
-
-# PCA降维
+import warnings
+import os
+import joblib
 from sklearn.decomposition import PCA
+from sklearn.feature_selection import SelectKBest, f_classif
 from sklearn.preprocessing import StandardScaler
 
-def pca_reduction(df_in, cols_pca, n_components=0.95):
-    df_out = df_in.copy()
-    # Ensure all columns for PCA are numeric and have no NaNs
-    numeric_pca_cols = [col for col in cols_pca if col in df_out.columns and pd.api.types.is_numeric_dtype(df_out[col])]
+# 配置设置
+warnings.filterwarnings('ignore')
+plt.rcParams['font.sans-serif'] = ['fangsong']  # 设置中文字体
+plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示异常问题
+
+class FinancialDataPreprocessor:
+    def __init__(self, data_paths):
+        """
+        初始化财务数据预处理器
+        参数:
+        data_paths (dict): 数据路径字典（键值对）:
+            'category': 行业类别数据路径
+            'financial': 财务数据路径
+            'fields': 字段含义数据路径
+        """
+        self.data_paths = data_paths
+        self.fields = {}  # 字段含义字典
+        self.df = None  # 主数据集
+        self.processed_df = None  # 处理后的数据
+        
+    def load_and_merge_data(self):
+        """加载并合并数据"""
+        # 1. 加载数据
+        df_category = pd.read_csv(self.data_paths['category'], encoding='utf-8', on_bad_lines='skip')
+        df_financial = pd.read_csv(self.data_paths['financial'], encoding='utf-8', on_bad_lines='skip')
+        df_fields = pd.read_excel(self.data_paths['fields'])
+        
+        # 创建字段含义字典
+        self.fields = dict(zip(df_fields['字段名'], zip(df_fields['含义'], df_fields['单位'])))
+        
+        # 2. 数据合并
+        df_category.columns = ['TICKER_SYMBOL', '所属行业']
+        self.df = pd.merge(df_financial, df_category, how='left', on=['TICKER_SYMBOL'])
+        self.df.insert(1, 'INDUSTRY', self.df.pop('所属行业'))
+        self.fields['INDUSTRY'] = ('所属行业', np.nan)
+        
+        # 3. 筛选制造业数据
+        self.df = self.df[self.df['INDUSTRY'] == '制造业'].drop_duplicates().reset_index(drop=True)
+        return self.df
     
-    if not numeric_pca_cols:
-        print("No suitable numeric columns found for PCA.")
-        return df_out, None
-
-    X = df_out[numeric_pca_cols].fillna(0) # Simple NaN fill for PCA, consider more robust methods
-
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
+    def exploratory_data_analysis(self, output_dir='plots'):
+        """
+        执行探索性数据分析(EDA)
+        
+        参数:
+        output_dir 输出图表目录
+        """
+        # 确保输出目录存在
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # 打印基本信息
+        print("数据形状:", self.df.shape)
+        print("财务造假分布:\n", self.df['FLAG'].value_counts())
+        
+        # 选择部分数值型字段进行可视化
+        numeric_cols = ['AP', 'ADVANCE_RECEIPTS', 'SOLD_FOR_REPUR_FA', 'PAYROLL_PAYABLE', 
+                        'TAXES_PAYABLE', 'INT_PAYABLE', 'DIV_PAYABLE', 'OTH_PAYABLE']
+        
+        # 生成每个字段的直方图和箱线图
+        for col in numeric_cols:
+            self._plot_distribution(col, output_dir)
+        
+        # 数值型变量分布可视化
+        self._plot_numeric_distributions(numeric_cols, output_dir)
+        
+        # 缺失值分析
+        self._analyze_missing_values(output_dir)
+        
     
-    pca = PCA(n_components=n_components)
-    X_pca = pca.fit_transform(X_scaled)
+    def preprocess_data(self):
+        """执行数据预处理"""
+        if self.df is None:
+            raise ValueError("请先加载数据")
+            
+        df_processed = self.df.copy()
+        
+        # 缺失值处理
+        df_processed = self._handle_missing_values(df_processed)
+        
+        # 噪声处理示例
+        df_processed = self._bin_smooth(df_processed, 'BIZ_TAX_SURCHG', n_bins=5)
+        df_processed = self._moving_average_smooth(df_processed, 'T_SH_EQUITY', window=3)
+        
+        # 数据泛化示例
+        bins = [-float('inf'), 1e8, 1e9, float('inf')]
+        labels = ['小型企业', '中型企业', '大型企业']
+        df_processed = self._generalize_data(df_processed, 'N_INCOME', bins, labels)
+        
+        # 数值规约示例
+        df_processed = self._reduce_numerical(df_processed, ['NOPERATE_INCOME'])
+        
+        self.processed_df = df_processed
+        return df_processed
     
-    pca_cols_names = [f'PC{i+1}' for i in range(X_pca.shape[1])]
-    df_pca_out = pd.DataFrame(X_pca, columns=pca_cols_names, index=df_out.index)
+    def feature_engineering(self):
+        """执行特征工程"""
+        if self.processed_df is None:
+            raise ValueError("请先预处理数据")
+            
+        # 数据降维
+        numeric_cols = [col for col in self.processed_df.columns 
+                        if pd.api.types.is_numeric_dtype(self.processed_df[col]) 
+                        and col != 'FLAG']
+        pca_result = self._pca_reduction(self.processed_df, numeric_cols)
+        
+        # 特征选择
+        drop_cols = ['TICKER_SYMBOL', 'INDUSTRY', 'ACCOUTING_STANDARDS', 'N_INCOME_generalized', 
+                    'REPORT_TYPE', 'CURRENCY_CD', 'BIZ_TAX_SURCHG_bin', 'BIZ_TAX_SURCHG_smooth', 
+                    'T_SH_EQUITY_smooth', 'log_NOPERATE_INCOME']
+        
+        feature_cols = [col for col in self.processed_df.columns 
+                        if col not in (['FLAG'] + drop_cols) 
+                        and pd.api.types.is_numeric_dtype(self.processed_df[col])]
+        
+        if 'FLAG' in self.processed_df.columns and self.processed_df['FLAG'].notnull().sum() > 0:
+            X = self.processed_df[feature_cols]
+            y = self.processed_df['FLAG']
+            selected_features = self._filter_feature_selection(X, y)
+            return pca_result, selected_features
+        
+        return pca_result, None
     
-    print(f'解释方差比例: {pca.explained_variance_ratio_}')
-    print(f'累计解释方差比例: {sum(pca.explained_variance_ratio_)}')
+    def export_results(self, output_dir='output'):
+        """导出处理结果"""
+        os.makedirs(output_dir, exist_ok=True)
+        
+        with pd.ExcelWriter(f'{output_dir}/processed_data.xlsx') as writer:
+            if self.df is not None:
+                self.df.to_excel(writer, sheet_name='原始数据', index=False)
+            
+            if self.processed_df is not None:
+                self.processed_df.to_excel(writer, sheet_name='处理后数据', index=False)
+        
+        # 保存字段含义字典
+        joblib.dump(self.fields, f'{output_dir}/fields_dict.pkl')
+        
+        print(f"结果已导出到 {output_dir} 目录")
     
-    return df_pca_out
-
-# 示例：对财务指标进行PCA降维
-# Make sure df0.describe().columns only contains numeric columns or handle non-numeric ones
-cols_for_pca = [col for col in df0.columns if pd.api.types.is_numeric_dtype(df0[col]) and col != 'FLAG']
-df1_pca = pca_reduction(df0, cols_for_pca, n_components=0.95)
-#1. **整数**：直接指定保留的主成分数量。例如，n_components=2表示保留前两个主成分。
-#2. **浮点数（0到1之间）**：表示保留的方差比例。例如，n_components=0.95意味着保留95%的方差所需的主成分数量。
-print(df0.shape, df1_pca.shape if df1_pca is not None else "PCA not performed")
-print(df0.head())
-
-
-## 特征选择
-from sklearn.feature_selection import SelectKBest, f_classif
-
-# 过滤式特征选择
-def filter_feature_selection(X_fs, y_fs, k=10):
-    # Ensure y_fs has no NaNs
-    valid_indices = y_fs.notnull()
-    X_fs_clean = X_fs[valid_indices].fillna(0) # Fill NaNs in X, or use a more sophisticated method
-    y_fs_clean = y_fs[valid_indices]
-
-    if X_fs_clean.empty or y_fs_clean.empty:
-        print("Not enough data for feature selection after cleaning NaNs.")
-        return None, []
-
-    selector = SelectKBest(score_func=f_classif, k=min(k, X_fs_clean.shape[1])) # k cannot be > n_features
-    try:
-        X_new_fs = selector.fit_transform(X_fs_clean, y_fs_clean)
-        selected_features_fs = X_fs_clean.columns[selector.get_support()]
-        print(f'Selected features: {list(selected_features_fs)}')
-        return X_new_fs, selected_features_fs
-    except Exception as e:
-        print(f"Error during feature selection: {e}")
-        return None, []
-
-
-# 示例：使用ANOVA F-value选择前10个特征
-# Define drop_cols before using it
-drop_cols=['TICKER_SYMBOL','INDUSTRY','ACCOUTING_STANDARDS','N_INCOME_generalized','REPORT_TYPE','CURRENCY_CD',
-           'BIZ_TAX_SURCHG_bin', 'BIZ_TAX_SURCHG_smooth', 'T_SH_EQUITY_smooth', 'log_NOPERATE_INCOME'] # Added bin/smooth/log columns
-# Also ensure that all columns in X are numeric and FLAG (target) is handled
-cols_for_X = [col for col in df0.columns if col not in (['FLAG'] + drop_cols) and pd.api.types.is_numeric_dtype(df0[col])]
-
-if 'FLAG' in df0.columns and df0['FLAG'].notnull().sum() > 0:
-    X = df0[cols_for_X]
-    y = df0['FLAG']
-    X_new, selected_features = filter_feature_selection(X, y, k=10)
-else:
-    print("Target variable 'FLAG' is missing or all NaNs. Skipping feature selection.")
-
-print("Script finished.")
-
-# 导出数据到Excel文件
-import os
-
-# 确保output目录存在
-output_dir = './output'
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
-
-# 导出原始数据
-df.to_excel(f'{output_dir}/data.xlsx', sheet_name='原始数据', index=False)
-
-# 如果需要，导出处理后的数据和PCA结果到不同Sheet
-with pd.ExcelWriter(f'{output_dir}/data.xlsx', mode='a', engine='openpyxl') as writer:
-    df0.to_excel(writer, sheet_name='处理后数据', index=False)
-    if isinstance(df1_pca, pd.DataFrame) and not df1_pca.empty:
-        df1_pca.to_excel(writer, sheet_name='PCA结果', index=False)
+    #辅助工具函数
+    def _plot_distribution(self, col, output_dir):
+        """绘制单个字段的分布图"""
+        plt.figure(figsize=(8, 4))
+        plt.subplot(1, 2, 1)
+        sns.histplot(self.df[col], kde=True)
+        plt.title(f'{self.fields[col][0]}直方图')
+        
+        plt.subplot(1, 2, 2)
+        sns.boxplot(x=self.df[col])
+        plt.title(f'{self.fields[col][0]}箱线图')
+        
+        plt.savefig(f'{output_dir}/{col}_dist.png')
+        plt.close()
     
-    # 导出缺失值统计
-    data_null.to_excel(writer, sheet_name='缺失值统计', index=False)
+    def _plot_numeric_distributions(self, cols, output_dir, n_cols=4):
+        """绘制多个数值变量的分布"""
+        n_rows = (len(cols) + n_cols - 1) // n_cols
+        plt.figure(figsize=(20, 5 * n_rows))
+        
+        for i, col in enumerate(cols):
+            plt.subplot(n_rows, n_cols, i + 1)
+            sns.histplot(self.df[col], kde=True, bins=30)
+            plt.title(f'{self.fields[col][0]}分布', fontsize=12)
+            plt.xlabel('')
+        
+        plt.tight_layout()
+        plt.savefig(f'{output_dir}/numeric_distributions.png')
+        plt.close()
+    
+    def _analyze_missing_values(self, output_dir):
+        """分析并可视化缺失值"""
+        # 缺失值统计
+        data_null = self._miss_data_count(self.df)
+        print("缺失值统计表:\n", data_null)
+        
+        # 缺失值可视化
+        try:
+            import missingno as msno
+            msno.matrix(self.df, figsize=(15, 10))
+            plt.savefig(f'{output_dir}/missing_values_matrix.png')
+            plt.close()
+        except ImportError:
+            print("库异常")
+    
+    def _miss_data_count(self, data):
+        """生成缺失值统计表"""
+        null_count = data.isnull().sum().to_frame('缺失值数量')
+        null_count['缺失率(%)'] = (null_count['缺失值数量'] / len(data) * 100).round(2)
+        null_count['数据类型'] = data.dtypes
+        return null_count.reset_index().rename(columns={'index': '字段名'})
+    
+    def _handle_missing_values(self, df):
+        """处理缺失值"""
+        data_null = self._miss_data_count(df)
+        
+        # 确定处理策略
+        drop_cols = data_null[data_null['缺失率(%)'] >= 70]['字段名'].tolist()
+        fill0_cols = data_null[(data_null['缺失率(%)'] > 0) & (data_null['缺失率(%)'] < 70)]['字段名'].tolist()
+        
+        # 执行处理
+        df = df.drop(columns=drop_cols)
+        df[fill0_cols] = df[fill0_cols].fillna(0)
+        
+        print(f"删除了 {len(drop_cols)} 个高缺失率字段")
+        print(f"填充了 {len(fill0_cols)} 个字段的缺失值")
+        return df
+    
+    def _bin_smooth(self, df, col, n_bins=5, method='mean'):
+        """分箱平滑处理"""
+        if pd.api.types.is_numeric_dtype(df[col]) and df[col].notnull().all():
+            try:
+                df[f'{col}_bin'] = pd.cut(df[col], bins=n_bins)
+                
+                if method == 'mean':
+                    smooth_values = df.groupby(f'{col}_bin')[col].transform('mean')
+                elif method == 'median':
+                    smooth_values = df.groupby(f'{col}_bin')[col].transform('median')
+                else:
+                    return df
+                
+                df[f'{col}_smooth'] = smooth_values
+            except Exception as e:
+                print(f"分箱平滑处理出错: {e}")
+        return df
+    
+    def _moving_average_smooth(self, df, col, window=3):
+        """移动平均光滑处理"""
+        if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
+            df[f'{col}_smooth'] = df[col].rolling(window=window, min_periods=1).mean()
+        return df
+    
+    def _generalize_data(self, df, col, bins, labels):
+        """数据泛化处理"""
+        if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
+            df[f'{col}_generalized'] = pd.cut(df[col], bins=bins, labels=labels, right=False)
+        return df
+    
+    def _reduce_numerical(self, df, cols):
+        """数值规约处理"""
+        for col in cols:
+            if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
+                # 处理负值问题
+                if (df[col] < 0).any():
+                    df[f'log_{col}'] = np.log1p(df[col].apply(lambda x: x if x >= 0 else 0))
+                else:
+                    df[f'log_{col}'] = np.log1p(df[col])
+        return df
+    
+    def _pca_reduction(self, df, cols, n_components=0.95):
+        """PCA降维"""
+        numeric_cols = [col for col in cols if col in df.columns and pd.api.types.is_numeric_dtype(df[col])]
+        
+        if not numeric_cols:
+            print("没有找到适合PCA的数值型字段")
+            return None
+        
+        X = df[numeric_cols].fillna(0)
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        
+        pca = PCA(n_components=n_components)
+        X_pca = pca.fit_transform(X_scaled)
+        
+        pca_cols = [f'PC{i+1}' for i in range(X_pca.shape[1])]
+        df_pca = pd.DataFrame(X_pca, columns=pca_cols, index=df.index)
+        
+        print(f'主成分方差解释比例: {pca.explained_variance_ratio_}')
+        print(f'累计方差解释比例: {sum(pca.explained_variance_ratio_)}')
+        
+        return df_pca
+    
+    def _filter_feature_selection(self, X, y, k=10):
+        """过滤式特征选择"""
+        valid_indices = y.notnull()
+        X_clean = X[valid_indices].fillna(0)
+        y_clean = y[valid_indices]
+        
+        if X_clean.empty or y_clean.empty:
+            print("清洗后数据不足，无法进行特征选择")
+            return []
+        
+        selector = SelectKBest(score_func=f_classif, k=min(k, X_clean.shape[1]))
+        try:
+            selector.fit(X_clean, y_clean)
+            selected_features = X.columns[selector.get_support()]
+            print(f'筛选出的重要特征: {list(selected_features)}')
+            return selected_features
+        except Exception as e:
+            print(f"特征选择出错: {e}")
+            return []
+    
+# 主函数
+def main():
+    # 配置数据路径
+    data_paths = {
+        'category': 'data/data1.csv',
+        'financial': 'data/data2.csv',
+        'fields': 'data/data3.xlsx'
+    }
+    
+    # 创建预处理器实例
+    preprocessor = FinancialDataPreprocessor(data_paths)
+    
+    # 1. 加载并合并数据
+    raw_data = preprocessor.load_and_merge_data()
+    print("数据加载完成，形状:", raw_data.shape)
+    
+    # 2. 探索性数据分析
+    preprocessor.exploratory_data_analysis('./plots')
+    
+    # 3. 数据预处理
+    processed_data = preprocessor.preprocess_data()
+    print("数据预处理完成，形状:", processed_data.shape)
+    
+    # 4. 特征工程
+    pca_result, selected_features = preprocessor.feature_engineering()
+    if pca_result is not None:
+        print("PCA降维结果形状:", pca_result.shape)
+    if selected_features is not None:
+        print("筛选的特征:", selected_features)
+    
+    # 5. 导出结果
+    preprocessor.export_results('./output')
+    print("处理流程完成")
 
-print(f"数据已成功导出到 {output_dir}/data.xlsx")
+if __name__ == "__main__":
+    main()
