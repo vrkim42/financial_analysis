@@ -1,13 +1,3 @@
-"""
-财务造假检测数据预处理项目
-主要功能：
-1. 数据加载与合并
-2. 探索性数据分析（EDA）
-3. 数据预处理（缺失值处理、噪声处理、特征变换）
-4. 特征工程（降维、特征选择）
-5. 结果导出
-"""
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -19,7 +9,7 @@ from sklearn.decomposition import PCA
 from sklearn.feature_selection import SelectKBest, f_classif
 from sklearn.preprocessing import StandardScaler
 
-# 配置设置
+# 配置
 warnings.filterwarnings('ignore')
 plt.rcParams['font.sans-serif'] = ['fangsong']  # 设置中文字体
 plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示异常问题
